@@ -70,25 +70,33 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         handleJump();
       }
     };
-    const handleTouch = () => handleJump();
+    const handleTouch = (e: Event) => {
+      e.preventDefault();
+      handleJump();
+    };
 
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('mousedown', handleTouch);
+    window.addEventListener('pointerdown', handleTouch, { passive: false });
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('mousedown', handleTouch);
+      window.removeEventListener('pointerdown', handleTouch);
     };
   }, [handleJump]);
 
   const spawnPipe = (width: number, height: number) => {
-    const minHeight = 50;
-    const maxHeight = height - PHYSICS.PIPE_GAP - minHeight;
+    const pipeGap = height * 0.25; // 25% of height for gap
+    const minHeight = height * 0.1;
+    const maxHeight = height - pipeGap - minHeight;
     const topHeight = Math.random() * (maxHeight - minHeight) + minHeight;
     pipesRef.current.push({ x: width, topHeight, passed: false });
   };
 
   const update = (width: number, height: number) => {
     frameCountRef.current++;
+    
+    const catX = width * 0.2; // Cat stays at 20% horizontal
+    const pipeGap = height * 0.25;
+    const pipeWidth = Math.max(60, width * 0.15);
 
     if (gameState !== GameState.PLAYING) {
       // Gentle floating in start screen
@@ -99,7 +107,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       return;
     }
 
-    // Physics
+    // Physics (Adjusted for frame rate/screen size if needed, but gravity is usually fine)
     catRef.current.vy += PHYSICS.GRAVITY;
     catRef.current.y += catRef.current.vy;
     
@@ -113,7 +121,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     // Particles
     if (frameCountRef.current % 3 === 0) {
       particlesRef.current.push({
-        x: PHYSICS.CAT_X - 10,
+        x: catX - 10,
         y: catRef.current.y,
         vx: -1 - Math.random(),
         vy: (Math.random() - 0.5),
@@ -147,8 +155,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     });
     particlesRef.current = particlesRef.current.filter(p => p.life > 0);
 
-    // Pipes
-    if (frameCountRef.current % PHYSICS.PIPE_SPAWN_INTERVAL === 0) {
+    // Pipes (Spawn interval based on width/speed ratio)
+    const spawnInterval = Math.max(60, Math.floor(width / (PHYSICS.PIPE_SPEED * 1.5)));
+    if (frameCountRef.current % spawnInterval === 0) {
       spawnPipe(width, height);
     }
 
@@ -158,13 +167,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // Scoring
     pipesRef.current.forEach(pipe => {
-      if (!pipe.passed && pipe.x + PHYSICS.PIPE_WIDTH < PHYSICS.CAT_X) {
+      if (!pipe.passed && pipe.x + pipeWidth < catX) {
         pipe.passed = true;
         setScore(s => s + 1);
       }
     });
 
-    pipesRef.current = pipesRef.current.filter(p => p.x + PHYSICS.PIPE_WIDTH > -50);
+    pipesRef.current = pipesRef.current.filter(p => p.x + pipeWidth > -50);
 
     // Clouds
     cloudsRef.current.forEach(c => {
@@ -173,14 +182,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     });
 
     // Collisions
-    const catSize = PHYSICS.CAT_SIZE * 0.7; // Tighter hit box
+    const catSize = PHYSICS.CAT_SIZE * (width < 600 ? 0.6 : 0.7); // Scale hitbox for smaller screens
     if (catRef.current.y < 0 || catRef.current.y > height) {
       onGameOver(score);
     }
 
     pipesRef.current.forEach(pipe => {
-      const horizontalHit = PHYSICS.CAT_X + catSize > pipe.x && PHYSICS.CAT_X - catSize < pipe.x + PHYSICS.PIPE_WIDTH;
-      const verticalHit = catRef.current.y - catSize < pipe.topHeight || catRef.current.y + catSize > pipe.topHeight + PHYSICS.PIPE_GAP;
+      const horizontalHit = catX + catSize > pipe.x && catX - catSize < pipe.x + pipeWidth;
+      const verticalHit = catRef.current.y - catSize < pipe.topHeight || catRef.current.y + catSize > pipe.topHeight + pipeGap;
       if (horizontalHit && verticalHit) {
         onGameOver(score);
       }
@@ -190,23 +199,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const draw = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     ctx.clearRect(0, 0, width, height);
 
+    const pipeWidth = Math.max(60, width * 0.15);
+    const pipeGap = height * 0.25;
+    const catX = width * 0.2;
+
     // Background Gradient
     const grad = ctx.createLinearGradient(0, 0, 0, height);
     grad.addColorStop(0, COLORS.skyStart);
     grad.addColorStop(1, COLORS.skyEnd);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, width, height);
-
-    // Clouds
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-    cloudsRef.current.forEach(c => {
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, 30 * c.scale, 0, Math.PI * 2);
-      ctx.arc(c.x + 40 * c.scale, c.y, 40 * c.scale, 0, Math.PI * 2);
-      ctx.arc(c.x + 80 * c.scale, c.y, 30 * c.scale, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
+    
     // Distant Hills (Parallax)
     ctx.fillStyle = COLORS.pipeBody;
     ctx.globalAlpha = 0.3;
@@ -218,6 +221,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     ctx.lineTo(width, height);
     ctx.fill();
     ctx.globalAlpha = 1;
+
+    // Clouds
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    cloudsRef.current.forEach(c => {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 30 * c.scale, 0, Math.PI * 2);
+      ctx.arc(c.x + 40 * c.scale, c.y, 40 * c.scale, 0, Math.PI * 2);
+      ctx.arc(c.x + 80 * c.scale, c.y, 30 * c.scale, 0, Math.PI * 2);
+      ctx.fill();
+    });
 
     // Particles
     particlesRef.current.forEach(p => {
@@ -248,14 +261,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     // Pipes
     pipesRef.current.forEach(pipe => {
       // Top Pipe
-      drawPipe(ctx, pipe.x, 0, PHYSICS.PIPE_WIDTH, pipe.topHeight, true);
+      drawPipe(ctx, pipe.x, 0, pipeWidth, pipe.topHeight, true);
       // Bottom Pipe
-      drawPipe(ctx, pipe.x, pipe.topHeight + PHYSICS.PIPE_GAP, PHYSICS.PIPE_WIDTH, height - (pipe.topHeight + PHYSICS.PIPE_GAP), false);
+      drawPipe(ctx, pipe.x, pipe.topHeight + pipeGap, pipeWidth, height - (pipe.topHeight + pipeGap), false);
     });
 
     // Cat
     const isSad = gameState === GameState.GAME_OVER;
-    drawCat(ctx, PHYSICS.CAT_X, catRef.current.y, catRef.current.rotation, catRef.current.wingFlap, isSad);
+    drawCat(ctx, catX, catRef.current.y, catRef.current.rotation, catRef.current.wingFlap, isSad);
   };
 
   const drawPipe = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, isTop: boolean) => {
